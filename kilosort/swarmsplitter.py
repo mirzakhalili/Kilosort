@@ -27,7 +27,8 @@ def check_split(Xd, kk, xtree, iclust, my_clus):
     b,_,_,_ = np.linalg.lstsq(CC,BB, rcond=None)
     xproj = Xs @ b
 
-    score = bimod_score(xproj)
+    # score = bimod_score(xproj)
+    score = my_bimod_score(xproj)
     return xproj, score
 
 def clean_tree(valid_merge, xtree, inode):
@@ -50,6 +51,15 @@ def bimod_score(xproj):
     xm2  = np.max(xbin[imin+175:])
 
     score = 1 - np.maximum(xmin/xm1, xmin/xm2)
+    return score
+
+#Sarle's bimodality coefficient
+def my_bimod_score(xproj):
+    from scipy.stats import kurtosis ,skew
+    g= skew(xproj)
+    k= kurtosis(xproj)
+    n=len(xproj)
+    score=(g**2+1)/(k+3*(n-1)**2/(n-2)/(n-3))
     return score
 
 def check_CCG(st1, st2=None, nbins = 500, tbin  = 1/1000):
@@ -111,7 +121,8 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
             xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
             # third mutation is bimodality
             #xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
-            criterion = 2 * (score <  .6) - 1
+            # criterion = 2 * (score <  .6) - 1
+            criterion = 2*(score<0.56)-1
 
         if criterion==0:
             # fourth mutation is local modularity (not reachable)
