@@ -243,7 +243,7 @@ def run_matching(ops, X, U, ctc, device=torch.device('cuda')):
     return  st, amps, th_amps, Xres
 
 
-def merging_function(ops, Wall, clu, st, tF, r_thresh=0.5, mode='ccg', check_dt=True,
+def merging_function(ops, Wall, clu, st, tF, r_thresh=0.8, mode='ccg', check_dt=True,
                      device=torch.device('cuda')):
     clu2 = clu.copy()
     clu_unq, ns = np.unique(clu2, return_counts = True)
