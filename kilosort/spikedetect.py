@@ -8,7 +8,7 @@ from torch.nn.functional import max_pool2d, avg_pool2d, conv1d, max_pool1d
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from sklearn.decomposition import TruncatedSVD
+from sklearn.decomposition import TruncatedSVD, PCA
 from tqdm import tqdm
 
 from kilosort.utils import template_path, log_performance
