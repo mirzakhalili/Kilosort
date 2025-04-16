@@ -21,8 +21,10 @@ def check_split(Xd, kk, xtree, iclust, my_clus):
     w[labels<0] = np.mean(labels>0)
 
     CC = Xs.T @ (Xs * w)
-    CC = CC + .01 * np.eye(CC.shape[0])
-    b = np.linalg.solve(CC, labels @ (Xs * w))
+    # CC = CC + .01 * np.eye(CC.shape[0])
+    # b = np.linalg.solve(CC, labels @ (Xs * w))
+    BB = labels @ (Xs * w)
+    b,_,_,_ = np.linalg.lstsq(CC,BB, rcond=None)
     xproj = Xs @ b
 
     score = bimod_score(xproj)
