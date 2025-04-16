@@ -246,7 +246,7 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
     nt = ops['nt']
     tarange = torch.arange(-(nt//2),nt//2+1, device = device)
     logger.info('Detecting spikes...')
-    prog = tqdm(np.arange(bfile.n_batches), miniters=200 if progress_bar else None, 
+    prog = tqdm(np.arange(bfile.n_batches, dtype=np.int64), miniters=200 if progress_bar else None, 
                 mininterval=60 if progress_bar else None)
     # repeat performance log after every 10 minutes of data
     log_skip = int(600 / (ops['batch_size'] / ops['fs']))
