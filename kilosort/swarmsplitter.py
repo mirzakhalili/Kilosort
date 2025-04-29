@@ -122,7 +122,7 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
             # third mutation is bimodality
             #xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
             # criterion = 2 * (score <  .6) - 1
-            criterion = 2*(score<0.56)-1
+            criterion = 2*(score<0.4)-1
 
         if criterion==0:
             # fourth mutation is local modularity (not reachable)
