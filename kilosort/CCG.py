@@ -77,8 +77,8 @@ def CCG_metrics(st1, st2, K, T, nbins=None, tbin=None):
     #print('%4.2f, %4.2f, %4.2f'%(R00, Q12, R12))
     return R12, Q12, Q00
 
-def check_CCG(st1, st2=None, nbins = 500, tbin  = 1/1000, acg_threshold=0.2,
-              ccg_threshold=0.25):
+def check_CCG(st1, st2=None, nbins = 500, tbin  = 1/1000, acg_threshold=0.1,
+              ccg_threshold=0.2):
     # NOTE: The default `acg_threshold=0.2` is different from the value of 0.1
     #       used for the Kilosort4 paper. We felt this better reflects common
     #       practice for determining 'good' units, but you can set
