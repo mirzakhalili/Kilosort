@@ -27,9 +27,10 @@ def check_split(Xd, kk, xtree, iclust, my_clus):
     b,_,_,_ = np.linalg.lstsq(CC,BB, rcond=None)
     xproj = Xs @ b
 
-    # score = bimod_score(xproj)
-    score = my_bimod_score(xproj)
-    return xproj, score
+    score1 = bimod_score(xproj)
+    score2 = my_bimod_score(xproj)
+    # return xproj, np.min((score1,score2))
+    return xproj, score1,score2
 
 def clean_tree(valid_merge, xtree, inode):
     ix = (xtree[:,2]==inode).nonzero()[0]
@@ -118,11 +119,11 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
             #criterion = 0
         
         if criterion==0:
-            xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
+            xproj, score1,score2 = check_split(Xd, kk, xtree, iclust, my_clus)
             # third mutation is bimodality
             #xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
-            # criterion = 2 * (score <  .6) - 1
-            criterion = 2*(score<0.4)-1
+            score=np.max((score1,score2))
+            criterion = 2 * (score <  .55) - 1     
 
         if criterion==0:
             # fourth mutation is local modularity (not reachable)
