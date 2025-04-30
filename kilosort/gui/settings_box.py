@@ -11,7 +11,7 @@ from scipy.io.matlab.miobase import MatReadError
 
 from kilosort.gui.logger import setup_logger
 from kilosort.gui.minor_gui_elements import ProbeBuilder, create_prb
-from kilosort.io import load_probe, BinaryRWFile
+from kilosort.io import load_probe, BinaryRWFile, BinaryFileGroup
 from kilosort.parameters import MAIN_PARAMETERS, EXTRA_PARAMETERS, compare_settings
 
 
@@ -45,10 +45,13 @@ class SettingsBox(QtWidgets.QGroupBox):
         self.select_data_file = QtWidgets.QPushButton("Select Binary File")
         self.data_file_path = self.gui.data_path
         if self.data_file_path is not None:
-            self.data_file_path = self.data_file_path.resolve()
+            path = self.data_file_path
+            if not isinstance(path, list): path = [path]
+            path = [p.resolve().as_posix() for p in path]
+        else:
+            path = None
         self.data_file_path_input = QtWidgets.QLineEdit(
-            self.data_file_path.as_posix()
-            if self.data_file_path is not None else None
+            str(path) if path is not None else None
             )
         
         if not self.gui.qt_settings.contains('last_data_location'):
@@ -60,7 +63,7 @@ class SettingsBox(QtWidgets.QGroupBox):
 
         self.results_directory_path = self.gui.results_directory
         if self.data_file_path is not None and self.results_directory_path is None:
-            self.results_directory_path = self.data_file_path.parent.joinpath('kilosort4/')
+            self.results_directory_path = self.data_file_path[0].parent.joinpath('kilosort4/')
 
         self.select_results_directory = QtWidgets.QPushButton(
             "Select Results Dir."
@@ -87,6 +90,21 @@ class SettingsBox(QtWidgets.QGroupBox):
                 self.bad_channels = []
         else:
             self.bad_channels = []
+
+        self.shank_idx_text = QtWidgets.QLabel("Shank Index:")
+        self.shank_idx_input = QtWidgets.QLineEdit()
+        if self.gui.qt_settings.contains('shank_idx'):
+            idx = self.gui.qt_settings.value('shank_idx')
+            if isinstance(idx, str):
+                self.shank_idx = float(idx)
+            elif isinstance(idx, list):
+                self.shank_idx = [float(s) for s in idx]
+            else:
+                self.shank_idx = idx
+        else:
+            self.shank_idx = None
+        self.shank_idx_input.setText(str(self.shank_idx))
+
 
         self.dtype_selector_text = QtWidgets.QLabel("Data dtype:")
         self.dtype_selector = QtWidgets.QComboBox()
@@ -224,6 +242,18 @@ class SettingsBox(QtWidgets.QGroupBox):
             "A list of channel indices (rows in the binary file) that should "
             "not be included in sorting.\nListing channels here is equivalent to "
             "excluding them from the probe dictionary."
+            )
+
+        row_count += rspan
+        layout.addWidget(self.shank_idx_text, row_count, col1, rspan, cspan1)
+        layout.addWidget(self.shank_idx_input, row_count, col2, rspan, cspan2)
+        self.shank_idx_input.editingFinished.connect(self.update_shank_idx)
+        self.shank_idx_text.setToolTip(
+            "If not None, only channels from the specified shank index will be used. "
+            "If a list is provided, each shank will be sorted sequentially and results "
+            "will be saved in separate subfolders. Note that the shank_idx value(s) "
+            "must match the actual value specified in `probe['kcoords']`. For example, "
+            "`probe_idx=0` will not work if `probe['kcoords']` uses 1,2,3,4."
             )
 
 
@@ -403,29 +433,28 @@ class SettingsBox(QtWidgets.QGroupBox):
 
     def on_select_data_file_clicked(self):
         file_dialog_options = QtWidgets.QFileDialog.DontUseNativeDialog
-        data_file_name, _ = QtWidgets.QFileDialog.getOpenFileName(
+        data_file_name, _ = QtWidgets.QFileDialog.getOpenFileNames(
             parent=self,
-            caption="Choose data file to load...",
+            caption="Choose data file(s) to load...",
             directory=self.gui.qt_settings.value('last_data_location'),
             options=file_dialog_options,
         )
         if data_file_name:
-            self.data_file_path_input.setText(data_file_name)
+            self.data_file_path_input.setText(str(data_file_name))
             self.data_file_path_input.editingFinished.emit()
             # Cache data folder for the next time a file is selected
-            data_folder = Path(data_file_name).parent.as_posix()
+            data_folder = Path(data_file_name[0]).parent.as_posix()
             self.gui.qt_settings.setValue('last_data_location', data_folder)
 
     def set_data_file_path_from_drag_and_drop(self, filename):
-        if Path(filename).suffix in ['.bin', '.dat', '.bat', '.raw']:
-            self.data_file_path_input.setText(filename)
+        if not isinstance(filename, list): filename = [filename]
+        if Path(filename[0]).suffix in ['.bin', '.dat', '.bat', '.raw']:
+            self.data_file_path_input.setText(str(filename))
             self.data_file_path_input.editingFinished.emit()
-            logger.info(f"File at location: {filename} is ready to load!")
-
         else:
             message = (
-                "Only .bin, .dat, .bat, and .raw files accepted as binary, "
-                "the data conversion tool will be opened instead..."
+                "Only .bin, .dat, .bat, and .raw files accepted. Use the "
+                "file conversion tool instead."
                 )
             QtWidgets.QMessageBox.warning(
                 self.parent(),
@@ -434,9 +463,7 @@ class SettingsBox(QtWidgets.QGroupBox):
                 QtWidgets.QMessageBox.StandardButton.Ok,
                 QtWidgets.QMessageBox.StandardButton.Ok,
             )
-            self.gui.converter.filename = filename
-            self.gui.converter.filename_input.setText(filename)
-            self.gui.converter.show()
+
 
     def open_data_converter(self):
         self.gui.converter.show()
@@ -467,16 +494,20 @@ class SettingsBox(QtWidgets.QGroupBox):
 
     def on_data_file_path_changed(self):
         self.path_check = None
-        data_file_path = Path(self.data_file_path_input.text())
+        text = self.data_file_path_input.text()[1:-1]
+        # Remove whitespace and single or double quotes
+        file_string = ''.join(text.split()).replace("'","").replace('"','')
+        # Get it back in list form
+        file_list = file_string.split(',')
+        data_paths = [Path(f) for f in file_list]
         try:
-            assert self.check_valid_binary_path(data_file_path)
-            self.data_file_path = data_file_path
-            self.gui.qt_settings.setValue('data_file_path', data_file_path)
-
-            parent_folder = data_file_path.parent
+            self.check_valid_binary_path(data_paths)
+            parent_folder = data_paths[0].parent
             results_folder = parent_folder / "kilosort4"
             self.results_directory_input.setText(results_folder.as_posix())
             self.results_directory_input.editingFinished.emit()
+            self.data_file_path = data_paths
+            self.gui.qt_settings.setValue('data_file_path', data_paths)
 
             if self.check_settings():
                 self.enable_load()
@@ -485,7 +516,7 @@ class SettingsBox(QtWidgets.QGroupBox):
                 self.disable_load()
 
         except AssertionError:
-            logger.exception("Please select a valid binary file path.")
+            logger.exception("Please select a valid binary file path(s).")
             self.disable_load()
 
     def check_valid_binary_path(self, filename):
@@ -498,16 +529,21 @@ class SettingsBox(QtWidgets.QGroupBox):
             print('Binary path is None.')
             check = False
         else:
-            f = Path(filename)
-            if f.exists() and f.is_file():
-                if f.suffix in _ALLOWED_FILE_TYPES or self.use_file_object:
-                    check = True
+            if not isinstance(filename, list): filename = [filename]
+            for p in filename:
+                f = Path(p)
+                if f.exists() and f.is_file():
+                    if f.suffix in _ALLOWED_FILE_TYPES or self.use_file_object:
+                        check = True
+                    else:
+                        print(f"Binary file has invalid suffix. "
+                               "Must be {_ALLOWED_FILE_TYPES}")
+                        check = False
+                        break
                 else:
-                    print(f'Binary file has invalid suffix. Must be {_ALLOWED_FILE_TYPES}')
+                    print('Binary file does not exist at that path.')
                     check = False
-            else:
-                print('Binary file does not exist at that path.')
-                check = False
+                    break
         
         self.path_check = check
         return check
@@ -748,13 +784,23 @@ class SettingsBox(QtWidgets.QGroupBox):
         # Remove brackets and white space if present, convert to list of ints.
         self.bad_channels = self.get_bad_channels()
         self.gui.qt_settings.setValue('bad_channels', self.bad_channels)
-
         if not self.pause_checks:
-            # Trigger update so that probe layout in main gets updated, then
-            # refresh probe view.
-            self.update_settings()
             self.previewProbe.emit()
 
+    @QtCore.Slot()
+    def update_shank_idx(self):
+        # Remove brackets and white space if present, convert to list of floats.
+        text = self.shank_idx_input.text()
+        text = text.replace(']','').replace('[','').replace(' ','')
+        if len(text) > 0 and text.lower() != 'none':
+            idx = float(text)
+        else:
+            idx = None
+        self.shank_idx = idx
+        self.gui.qt_settings.setValue('shank_idx', self.shank_idx)
+
+        if not self.pause_checks:
+            self.previewProbe.emit()
 
     def on_data_dtype_selected(self, data_dtype):
         self.data_dtype = data_dtype
@@ -816,7 +862,7 @@ class SettingsBox(QtWidgets.QGroupBox):
             if self.use_file_object:
                 return self.gui.file_object.c
             
-            memmap_data = np.memmap(self.data_file_path, dtype=self.data_dtype)
+            memmap_data = np.memmap(self.data_file_path[0], dtype=self.data_dtype)
             data_size = memmap_data.size
 
             test_n_channels = np.arange(num_channels, num_channels + 31)
@@ -839,9 +885,6 @@ class SettingsBox(QtWidgets.QGroupBox):
 
         else:
             return num_channels
-
-    def preapre_for_new_context(self):
-        pass
 
     def reset(self):
         self.data_file_path_input.clear()

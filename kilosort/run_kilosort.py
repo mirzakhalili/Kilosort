@@ -1,6 +1,5 @@
 import time
 from pathlib import Path
-import pprint
 import logging
 import warnings
 import platform
@@ -25,6 +24,7 @@ from kilosort.parameters import DEFAULT_SETTINGS
 from kilosort.utils import (
     log_performance, log_cuda_details, probe_as_string, ops_as_string
     )
+import kilosort.plots as kplots
 
 RECOGNIZED_SETTINGS = list(DEFAULT_SETTINGS.keys())
 RECOGNIZED_SETTINGS.extend([
@@ -38,7 +38,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  data_dir=None, file_object=None, results_dir=None,
                  data_dtype=None, do_CAR=True, invert_sign=False, device=None,
                  progress_bar=None, save_extra_vars=False, clear_cache=False,
-                 save_preprocessed_copy=False, bad_channels=None,
+                 save_preprocessed_copy=False, bad_channels=None, shank_idx=None,
                  verbose_console=False, verbose_log=False):
     """Run full spike sorting pipeline on specified data.
     
@@ -58,9 +58,10 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         `probe is None`. Alternatively, the full filepath to a probe stored in
         any directory can be specified with `settings = {'probe_path': ...}`.
         See `kilosort.utils` for default `PROBE_DIR` definition.
-    filename: str or Path; optional.
-        Full path to binary data file. If specified, will also set
-        `data_dir = filename.parent`.
+    filename: Path-like or list of Path-likes; optional.
+        Full path to binary data file(s). If specified, will also set
+        `data_dir = filename.parent`. If `filename` is a list, files will be
+        treated as a single recording concatenated in time in the order provided.
     data_dir : str or Path; optional.
         Specifies directory where binary data file is stored. Kilosort will
         attempt to find the binary file. This works best if there is exactly one
@@ -108,6 +109,12 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         A list of channel indices (rows in the binary file) that should not be
         included in sorting. Listing channels here is equivalent to excluding
         them from the probe dictionary.
+    shank_idx : float or list; optional.
+        If not None, only channels from the specified shank index will be used.
+        If a list is provided, each shank will be sorted sequentially and results
+        will be saved in separate subfolders. Note that the shank_idx value(s)
+        must match the actual value specified in `probe['kcoords']`. For example,
+        `probe_idx=0` will not work if `probe['kcoords']` uses 1,2,3,4.
     verbose_console : bool; default=False.
         If True, set logging level for console output to `DEBUG` instead
         of `INFO`, so that additional information normally only saved to the
@@ -169,17 +176,19 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             )
     settings = {**DEFAULT_SETTINGS, **settings}
     # NOTE: This modifies settings in-place
-    filename, data_dir, results_dir, probe = \
-        set_files(settings, filename, probe, probe_name, data_dir,
-                  results_dir, bad_channels)
-    setup_logger(results_dir, verbose_console=verbose_console)
+    if not isinstance(shank_idx, list): shank_idx = [shank_idx]
+    for idx in shank_idx:
+        _filename, _data_dir, _results_dir, _probe = \
+            set_files(settings, filename, probe, probe_name, data_dir,
+                      results_dir, bad_channels, idx)
+        setup_logger(_results_dir, verbose_console=verbose_console)
 
-    ops, st, clu, tF, Wall, similar_templates, \
-        is_ref, est_contam_rate, kept_spikes = _sort(
-            filename, results_dir, probe, settings, data_dtype, device, do_CAR,
-            clear_cache, invert_sign, save_preprocessed_copy, verbose_log,
-            save_extra_vars, file_object, progress_bar
-        )
+        ops, st, clu, tF, Wall, similar_templates, \
+            is_ref, est_contam_rate, kept_spikes = _sort(
+                _filename, _results_dir, _probe, settings, data_dtype, device,
+                do_CAR, clear_cache, invert_sign, save_preprocessed_copy,
+                verbose_log, save_extra_vars, file_object, progress_bar,
+            )
 
     return ops, st, clu, tF, Wall, similar_templates, \
            is_ref, est_contam_rate, kept_spikes
@@ -188,7 +197,14 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
 def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
           clear_cache, invert_sign, save_preprocessed_copy, verbose_log,
           save_extra_vars, file_object, progress_bar, gui_sorter=None):
-    """Run sorting pipeline. See `run_kilosort` for documentation."""
+    """Run sorting pipeline. See `run_kilosort` for documentation.
+    
+    Notes
+    -----
+    filename is expected to be a list of Paths at this point, even if it's
+    a singleton list.
+    
+    """
 
     try:
         logger.info(f"Kilosort version {kilosort.__version__}")
@@ -213,7 +229,10 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             logger.info(f'Using CUDA device: {torch.cuda.get_device_name()} {memory:.2f}GB')
 
         logger.info('-'*40)
-        logger.info(f"Sorting {filename}")
+        if len(filename) == 1:
+            logger.info(f"Sorting {filename}")
+        else:
+            logger.info(f"Sorting {filename[0].parent}/... (multiple files)")
 
         if data_dtype is None:
             logger.info(
@@ -234,8 +253,10 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             )
 
         tic0 = time.time()
-        ops = initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
-                                device, save_preprocessed_copy)
+        ops, settings = initialize_ops(
+            settings, probe, data_dtype, do_CAR, invert_sign,
+            device, save_preprocessed_copy
+            )
         
         # Pretty-print ops and probe for log
         logger.debug(f"Initial ops:\n\n{ops_as_string(ops)}\n")
@@ -248,22 +269,18 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         ops = compute_preprocessing(ops, device, tic0=tic0, file_object=file_object)
         np.random.seed(1)
         torch.cuda.manual_seed_all(1)
-        torch.random.manual_seed(1)
+        torch.random.manual_seed(1) 
         ops, bfile, st0 = compute_drift_correction(
             ops, device, tic0=tic0, progress_bar=progress_bar,
             file_object=file_object, clear_cache=clear_cache,
             verbose=verbose_log
             )
 
-        # Check scale of data for log file
-        b1 = bfile.padded_batch_to_torch(0).cpu().numpy()
-        logger.debug(f"First batch min, max: {b1.min(), b1.max()}")
-
         # Save preprocessing steps
         if save_preprocessed_copy:
             io.save_preprocessing(results_dir / 'temp_wh.dat', ops, bfile)
 
-        # Generate drift plots
+        logger.info('Generating drift plots ...')
         # st0 will be None if nblocks = 0 (no drift correction)
         if st0 is not None:
             if gui_sorter is not None:
@@ -271,8 +288,8 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
                 gui_sorter.st0 = st0
                 gui_sorter.plotDataReady.emit('drift')
             else:
-                # TODO: save non-GUI version of plot to results.
-                pass
+                kplots.plot_drift_amount(ops, results_dir)
+                kplots.plot_drift_scatter(st0, results_dir)
 
         # Sort spikes and save results
         st,tF, Wall0, clu0 = detect_spikes(
@@ -280,15 +297,14 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             clear_cache=clear_cache, verbose=verbose_log
             )
 
-        # Generate diagnosic plots
+        logger.info('Generating diagnostic plots ...')
         if gui_sorter is not None:
             gui_sorter.Wall0 = Wall0
             gui_sorter.wPCA = torch.clone(ops['wPCA'].cpu()).numpy()
             gui_sorter.clu0 = clu0
             gui_sorter.plotDataReady.emit('diagnostics')
         else:
-            # TODO: save non-GUI version of plot to results.
-            pass
+            kplots.plot_diagnostics(Wall0, clu0, ops, results_dir)
 
         clu, Wall, st, tF = cluster_spikes(
             st, tF, ops, device, bfile, tic0=tic0, progress_bar=progress_bar,
@@ -301,19 +317,14 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
                 save_preprocessed_copy=save_preprocessed_copy
                 )
 
-        # Generate spike positions plot
+        logger.info('Generating spike position plot ...')
         if gui_sorter is not None:
-            # TODO: re-use spike positions saved by `save_sorting` instead of
-            #       computing them again in `kilosort.gui.sanity_plots`.
-            gui_sorter.ops = ops
-            gui_sorter.st = st[kept_spikes]
             gui_sorter.clu = clu[kept_spikes]
-            gui_sorter.tF = tF[kept_spikes]
             gui_sorter.is_refractory = is_ref
             gui_sorter.plotDataReady.emit('probe')
         else:
-            # TODO: save non-GUI version of plot to results.
-            pass
+            kplots.plot_spike_positions(clu[kept_spikes], is_ref, results_dir)
+        logger.info('Sorting finished.')
         
     except Exception as e:
         if isinstance(e, torch.cuda.OutOfMemoryError):
@@ -335,8 +346,8 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
            is_ref, est_contam_rate, kept_spikes
 
 
-def set_files(settings, filename, probe, probe_name,
-              data_dir, results_dir, bad_channels):
+def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
+              bad_channels, shank_idx):
     """Parse file and directory information for data, probe, and results."""
 
     # Check for filename 
@@ -354,10 +365,13 @@ def set_files(settings, filename, probe, probe_name,
         # Find binary file in the folder
         filename  = io.find_binary(data_dir=data_dir)
     else:
-        filename = Path(filename)
-        if not filename.exists():
-            raise FileExistsError(f"filename '{filename}' does not exist")
-        data_dir = filename.parent
+        if not isinstance(filename, list):
+            filename = [filename]
+        filename = [Path(f) for f in filename]
+        for f in filename:
+            if not f.exists():
+                raise FileExistsError(f"filename '{filename}' does not exist")
+        data_dir = filename[0].parent
         
     # Convert paths to strings when saving to ops, otherwise ops can only
     # be loaded on the operating system that originally ran the code.
@@ -369,6 +383,8 @@ def set_files(settings, filename, probe, probe_name,
     results_dir = Path(results_dir).resolve() if results_dir is not None else None
     if results_dir is None:
         results_dir = data_dir / 'kilosort4'
+    if shank_idx is not None:
+        results_dir = results_dir / f'shank_{shank_idx}'
     # Make sure results directory exists
     results_dir.mkdir(exist_ok=True)
     
@@ -390,6 +406,8 @@ def set_files(settings, filename, probe, probe_name,
 
     if bad_channels is not None:
         probe = io.remove_bad_channels(probe, bad_channels)
+    if shank_idx is not None:
+        probe = io.select_shank(probe, shank_idx)
 
     return filename, data_dir, results_dir, probe
 
@@ -439,6 +457,7 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
                    device, save_preprocessed_copy) -> dict:
     """Package settings and probe information into a single `ops` dictionary."""
 
+    settings = settings.copy()
     if settings['nt0min'] is None:
         settings['nt0min'] = int(20 * settings['nt']/61)
     if settings['max_channel_distance'] is None:
@@ -496,7 +515,7 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
 
     ops = {**ops, **probe}
 
-    return ops
+    return ops, settings
 
 def get_run_parameters(ops) -> list:
     """Get `ops` dict values needed by `run_kilosort` subroutines."""
@@ -585,6 +604,9 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
                 f'total {time.time()-tic0 : .2f}s')
     logger.debug(f'hp_filter shape: {hp_filter.shape}')
     logger.debug(f'whiten_mat shape: {whiten_mat.shape}')
+    # Check scale of data for log file
+    b1 = bfile.padded_batch_to_torch(0).cpu().numpy()
+    logger.debug(f"First batch min, max: {b1.min(), b1.max()}")
 
     log_performance(logger, 'info', 'Resource usage after preprocessing')
 

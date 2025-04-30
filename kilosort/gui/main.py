@@ -11,7 +11,7 @@ from kilosort.gui import (
     DataConversionBox
 )
 from kilosort.gui.logger import setup_logger
-from kilosort.io import BinaryFiltered, remove_bad_channels
+from kilosort.io import BinaryFiltered, remove_bad_channels, select_shank
 from kilosort.utils import DOWNLOADS_DIR, download_probes
 from qtpy import QtCore, QtGui, QtWidgets
 
@@ -185,28 +185,7 @@ class KilosortGUI(QtWidgets.QMainWindow):
 
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
-        filename = files[0]
-        self.settings_box.set_data_file_path_from_drag_and_drop(filename)
-
-        # NOTE: May choose to re-enable this at some point, but for now I don't
-        #       think it's necessary and the repeated dialog popups are pretty
-        #       intrusive.
-
-        # if self.context is None:
-        #     self.settings_box.set_data_file_path_from_drag_and_drop(filename)
-        # else:
-        #     response = QtWidgets.QMessageBox.warning(
-        #         self,
-        #         "Are you sure?",
-        #         "You are attempting to load a new file while another file "
-        #         "is already loaded. Are you sure you want to proceed?",
-        #         QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        #         QtWidgets.QMessageBox.No
-        #         )
-        #        
-        #     if response == QtWidgets.QMessageBox.Yes:
-        #         self.settings_box.set_data_file_path_from_drag_and_drop(filename)
-
+        self.settings_box.set_data_file_path_from_drag_and_drop(files)
 
     def setup(self):
         self.setWindowTitle(f"Kilosort4")
@@ -332,10 +311,14 @@ class KilosortGUI(QtWidgets.QMainWindow):
     def set_parameters(self):
         settings = self.settings_box.settings
         bad_channels = self.settings_box.bad_channels
+        shank_idx = self.settings_box.shank_idx
 
         self.data_path = settings["data_file_path"]
         self.results_directory = settings["results_dir"]
-        self.probe_layout = remove_bad_channels(settings["probe"], bad_channels)
+        probe = remove_bad_channels(settings["probe"], bad_channels)
+        if shank_idx is not None:
+            probe = select_shank(probe, shank_idx)
+        self.probe_layout = probe
         self.probe_name = settings["probe_name"]
         self.num_channels = settings["n_chan_bin"]
 
@@ -345,9 +328,6 @@ class KilosortGUI(QtWidgets.QMainWindow):
         params['do_CAR'] = self.run_box.do_CAR_check.isChecked()
         params['invert_sign'] = self.run_box.invert_sign_check.isChecked()
         params['verbose_log'] = self.run_box.verbose_check.isChecked()
-
-        assert params
-
         self.params = params
 
     def do_load(self):
@@ -424,6 +404,7 @@ class KilosortGUI(QtWidgets.QMainWindow):
         self.data_view_box.set_highpass_filter(self.context.highpass_filter)
 
     def add_file_object(self):
+        # Only needed for file objects loaded through data conversion tool.
         self.file_object = self.converter.file_object
         # NOTE: This filename will not actually be loaded the usual way, it's
         #       just there to keep track of where the data is coming from
@@ -526,7 +507,6 @@ class KilosortGUI(QtWidgets.QMainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         # Make sure all threads and pop-out windows are closed as well.
-        self.message_log_box.save_log_file()
         self.message_log_box.popout_window.close()
         for _, p in self.run_box.plots.items():
             p.close()
