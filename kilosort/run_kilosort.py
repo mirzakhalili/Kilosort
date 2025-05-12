@@ -29,9 +29,14 @@ import kilosort.plots as kplots
 RECOGNIZED_SETTINGS = list(DEFAULT_SETTINGS.keys())
 RECOGNIZED_SETTINGS.extend([
     'filename', 'data_dir', 'results_dir', 'probe_name', 'probe_path',
+])
+# These get mixed in with the other parameters when running through the GUI.
+# When using the API, these should NOT be included in a settings dictionary
+# even if they share a name with run_kilosort options.
+GUI_SETTINGS = [
     'data_file_path', 'probe', 'data_dtype', 'save_preprocessed_copy',
     'clear_cache', 'do_CAR', 'invert_sign', 'verbose_log'
-])
+]
 
 
 def run_kilosort(settings, probe=None, probe_name=None, filename=None,
@@ -255,7 +260,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         tic0 = time.time()
         ops, settings = initialize_ops(
             settings, probe, data_dtype, do_CAR, invert_sign,
-            device, save_preprocessed_copy
+            device, save_preprocessed_copy, gui_mode=(gui_sorter is not None)
             )
         
         # Pretty-print ops and probe for log
@@ -364,6 +369,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
 
         # Find binary file in the folder
         filename  = io.find_binary(data_dir=data_dir)
+        filename = [filename]
     else:
         if not isinstance(filename, list):
             filename = [filename]
@@ -386,7 +392,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
     if shank_idx is not None:
         results_dir = results_dir / f'shank_{shank_idx}'
     # Make sure results directory exists
-    results_dir.mkdir(exist_ok=True)
+    results_dir.mkdir(exist_ok=True, parents=True)
     
     # find probe configuration file and load
     if probe is None:
@@ -403,6 +409,14 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
         # with some pytorch functions.
         probe['xc'] = probe['xc'].astype(np.float32)
         probe['yc'] = probe['yc'].astype(np.float32)
+
+    # Let user know if there are too many dimensions in probe entries.
+    # Don't want to automatically flatten them incase they've made assumptions
+    # about higher-D ordering.
+    for k in ['xc', 'yc', 'kcoords', 'chanMap']:
+        if probe[k].ndim > 1:
+            raise ValueError(f"Array-valued probe entries should have 1 dim, "
+                             f"but key: {k} has ndim == {probe[k].ndim}.")
 
     if bad_channels is not None:
         probe = io.remove_bad_channels(probe, bad_channels)
@@ -454,7 +468,7 @@ def close_logger():
 
 
 def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
-                   device, save_preprocessed_copy) -> dict:
+                   device, save_preprocessed_copy, gui_mode=False) -> dict:
     """Package settings and probe information into a single `ops` dictionary."""
 
     settings = settings.copy()
@@ -483,11 +497,17 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
         warnings.warn(msg, DeprecationWarning)
     dup_bins = int(settings['duplicate_spike_ms'] * (settings['fs']/1000))
 
+    # If running through GUI, also allow some additional relevant keys in
+    # settings dictionary.
+    recognized = RECOGNIZED_SETTINGS.copy()
+    if gui_mode:
+        recognized.extend(GUI_SETTINGS.copy())
+
     # Raise an error if there are unrecognized settings entries to make users
     # aware if they've made a typo, are using a deprecated setting, etc.
     unrecognized = []
     for k, _ in settings.items():
-        if k not in RECOGNIZED_SETTINGS:
+        if k not in recognized:
             unrecognized.append(k)
     if len(unrecognized) > 0:
         logger.info('Unrecognized keys found in `settings`')
