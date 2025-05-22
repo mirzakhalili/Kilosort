@@ -16,7 +16,7 @@ from torch.fft import fft, ifft, fftshift
 from kilosort import CCG
 from kilosort.preprocessing import get_drift_matrix, fft_highpass
 from kilosort.postprocessing import (
-    remove_duplicates, compute_spike_positions, make_pc_features
+    remove_duplicates, compute_spike_positions, make_pc_features,remove_duplicates_with_global_mean_amplitude
     )
 
 _torch_warning = ".*PyTorch does not support non-writable tensors"
@@ -411,8 +411,11 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     spike_positions = np.vstack([xs, ys]).T
     amplitudes = ((tF**2).sum(axis=(-2,-1))**0.5).cpu().numpy()
     # remove duplicate (artifact) spikes
-    spike_times, spike_clusters, kept_spikes = remove_duplicates(
-        spike_times, spike_clusters, dt=ops['duplicate_spike_bins']
+    # spike_times, spike_clusters, kept_spikes = remove_duplicates(
+    #     spike_times, spike_clusters, dt=ops['duplicate_spike_bins']
+    # )
+    spike_times, spike_clusters, kept_spikes = remove_duplicates_with_global_mean_amplitude(
+        spike_times, spike_clusters,amplitudes, dt=ops['duplicate_spike_bins']
     )
     amp = amplitudes[kept_spikes]
     spike_templates = spike_templates[kept_spikes]
