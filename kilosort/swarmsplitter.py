@@ -109,7 +109,7 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
         score = np.nan
         if criterion==0:
             # first mutation is global modularity
-            if tstat[kk,0] < 0.2:
+            if tstat[kk,0] < 0.25:
                 criterion = -1
 
 

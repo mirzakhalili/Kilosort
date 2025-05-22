@@ -30,6 +30,37 @@ def remove_duplicates(spike_times, spike_clusters, dt=15):
     return spike_times[keep], spike_clusters[keep], keep
 
 
+@njit("(int64[:], int32[:], float32[:], int32)")
+def remove_duplicates_with_global_mean_amplitude(spike_times, spike_clusters, amplitudes, dt=15):
+
+    '''Removes same-cluster spikes that occur within `dt` samples.'''
+    keep = np.zeros_like(spike_times, bool_)
+    checked= np.zeros_like(spike_times)
+    i = 0
+    unique_clusters = np.unique(spike_clusters)
+    mean_amplitude=np.zeros(unique_clusters.size, dtype=np.float32)
+    for c in unique_clusters:
+        mean_amplitude[c] = np.mean(amplitudes[spike_clusters == c])
+    for i in range(spike_times.size):
+        if checked[i]==0:        
+            group = [i]
+            c = spike_clusters[i]
+            for j in range(i+1, spike_times.size):                
+                if spike_clusters[j] == c:                    
+                    if spike_times[j] - spike_times[i] <= dt:
+                        checked[j]=1
+                        group.append(j)
+                    else:
+                        break    
+            group=np.array(group)
+            test=amplitudes[group]            
+            ind_closest =np.argmin(np.abs(test-mean_amplitude[c])) 
+            picked_index = group[ind_closest]
+            keep[picked_index] = True
+            checked[picked_index]=0
+
+    return spike_times[keep], spike_clusters[keep], keep
+
 def compute_spike_positions(st, tF, ops):
     '''Get x,y positions of spikes relative to probe.'''
     # Determine channel weightings for nearest channels
@@ -114,7 +145,10 @@ def make_pc_features(ops, spike_templates, spike_clusters, tF):
         # Assign features to overwrite tF in-place
         tF[igood,:] = Xd[:, ind[:n_chans], :]
         # Save channel inds for phy
-        feature_ind[i,:] = ichan[ind[:n_chans]].cpu().numpy()
+        try:
+            feature_ind[i,:] = ichan[ind[:n_chans]].cpu().numpy()
+        except Exception as e:
+            print(spike_clusters)
 
     # Swap last 2 dimensions to get ordering Phy expects
     tF = torch.permute(tF, (0, 2, 1))
