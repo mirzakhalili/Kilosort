@@ -18,6 +18,7 @@ from kilosort.preprocessing import get_drift_matrix, fft_highpass
 from kilosort.postprocessing import (
     remove_duplicates, compute_spike_positions, make_pc_features,remove_duplicates_with_global_mean_amplitude
     )
+from kilosort.utils import log_performance
 
 _torch_warning = ".*PyTorch does not support non-writable tensors"
 
@@ -246,7 +247,7 @@ def select_shank(probe, shank_idx):
 
 def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
                 data_dtype=None, save_extra_vars=False,
-                save_preprocessed_copy=False):
+                save_preprocessed_copy=False, skip_dat_path=False):
     """Save sorting results to disk in a format readable by Phy.
 
     Parameters
@@ -282,6 +283,13 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
         If True, save a pre-processed copy of the data (including drift
         correction) to `temp_wh.dat` in the results directory and format Phy
         output to use that copy of the data.
+    skip_dat_path : bool; default=False.
+        If True, will save `dat_path = 'no_path.bin'` in `params.py` in place
+        of a real filename. This is done to prevent an error in Phy when filename
+        has an unexpected format, like when using a `file_object` loaded from
+        an external data format through SpikeInterface. The full filename(s) will
+        still be included in `params.py` for reference, but will be commented out.
+
     
     Returns
     -------
@@ -402,6 +410,8 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
         )
     np.save((results_dir / 'whitening_mat.npy'), whitening_mat.cpu())
     np.save((results_dir / 'whitening_mat_inv.npy'), whitening_mat_inv.cpu())
+    log_performance(logger, level='debug', header='save_to_phy, whitening',
+                    reset=True)
 
     # spike properties
     spike_times = st[:,0].astype('int64') + imin  # shift by minimum sample index
@@ -409,7 +419,10 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     spike_clusters = clu
     xs, ys = compute_spike_positions(st, tF, ops)
     spike_positions = np.vstack([xs, ys]).T
-    amplitudes = ((tF**2).sum(axis=(-2,-1))**0.5).cpu().numpy()
+    amplitudes = torch.norm(tF, dim=[-2,-1]).cpu().numpy()
+    log_performance(logger, level='debug', header='save_to_phy, spike positions',
+                    reset=True)
+
     # remove duplicate (artifact) spikes
     # spike_times, spike_clusters, kept_spikes = remove_duplicates(
     #     spike_times, spike_clusters, dt=ops['duplicate_spike_bins']
@@ -429,16 +442,20 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     # Save spike mask so that it can be applied to other variables if needed
     # when loading results.
     np.save((results_dir / 'kept_spikes.npy'), kept_spikes)
+    log_performance(logger, level='debug', header='save_to_phy, remove duplicates',
+                    reset=True)
 
     # template properties
     similar_templates = CCG.similarity(Wall, ops['wPCA'].contiguous(), nt=ops['nt'])
-    template_amplitudes = ((Wall**2).sum(axis=(-2,-1))**0.5).cpu().numpy()
+    template_amplitudes = torch.norm(Wall, dim=[-2,-1]).cpu().numpy()
     templates = (Wall.unsqueeze(-1).cpu() * ops['wPCA'].cpu()).sum(axis=-2).numpy()
     templates = templates.transpose(0,2,1)
     templates_ind = np.tile(np.arange(Wall.shape[1])[np.newaxis, :], (templates.shape[0],1))
     np.save((results_dir / 'similar_templates.npy'), similar_templates)
     np.save((results_dir / 'templates.npy'), templates)
     np.save((results_dir / 'templates_ind.npy'), templates_ind)
+    log_performance(logger, level='debug', header='save_to_phy, template props',
+                    reset=True)
     
     # pc features
     if save_extra_vars:
@@ -452,6 +469,8 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
         )
     np.save(results_dir / 'pc_features.npy', pc_features)
     np.save(results_dir / 'pc_feature_ind.npy', pc_feature_ind)
+    log_performance(logger, level='debug', header='save_to_phy, pc features',
+                    reset=True)
 
     # contamination ratio
     acg_threshold = ops['settings']['acg_threshold']
@@ -459,6 +478,8 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     is_ref, est_contam_rate = CCG.refract(spike_clusters, spike_times / ops['fs'],
                                           acg_threshold=acg_threshold,
                                           ccg_threshold=ccg_threshold)
+    log_performance(logger, level='debug', header='save_to_phy, est contam',
+                    reset=True)
 
     # write properties to *.tsv
     stypes = ['ContamPct', 'Amplitude', 'KSLabel']
@@ -495,10 +516,12 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
         params['dtype'] = dtype
         params['hp_filtered'] = False
         params['dat_path'] = dat_path
-        #params['dat_path'] = f"'{dat_path.resolve().as_posix()}'"
 
     with open((results_dir / 'params.py'), 'w') as f: 
         for key in params.keys():
+            if (key == 'dat_path') and skip_dat_path:
+                f.write(f'dat_path = "no_path.bin"\n')
+                f.write('# ')
             f.write(f'{key} = {params[key]}\n')
 
     if save_extra_vars:
@@ -660,11 +683,15 @@ class BinaryRWFile:
         self.dtype = dtype
 
         if isinstance(filename, list) and len(filename) > 1:
-            if file_object is not None:
-                raise ValueError('Cannot specify both file_object and a list of files.')
-            f = BinaryFileGroup(filenames=filename, n_channels=n_chan_bin,
-                                dtype=dtype)
-            file_object = f
+            if file_object is None:
+                file_object = BinaryFileGroup(
+                    filenames=filename, n_channels=n_chan_bin, dtype=dtype
+                    )
+            else:
+                logger.info(
+                    "`file_object is not None`, "
+                    "it will be used instead of loading from filename."
+                    )
         self.file_object = file_object
 
         if str(self.dtype) not in self.supported_dtypes:
@@ -1078,7 +1105,7 @@ class BinaryFiltered(BinaryRWFile):
             return self.filter(X, ops, ibatch, skip_preproc=skip_preproc)
 
 
-def save_preprocessing(filename, ops, bfile=None, bfile_path=None):
+def save_preprocessing(filename, ops, bfile=None, bfile_path=None, verbose=False):
     """Save a preprocessed copy of data, including drift correction.
 
     Parameters
@@ -1127,16 +1154,14 @@ def save_preprocessing(filename, ops, bfile=None, bfile_path=None):
     W = np.vstack([weights, np.flip(weights)])
     W = np.tile(W, n_chans_used).reshape(2, n_chans_used, 2*nt)
 
-    # NOTE: dtype for new file is always int16, float32 data returned by preproc
-    #       steps is scaled by 200 and then converted.
-    z = np.memmap(filename, dtype='int16', mode='w+', shape=(NT*n_batches, n_chans))
-
     logger.info(' ')
     logger.info('='*40)
     logger.info(f'Saving drift-corrected copy of data to: {filename}...')
     for i in range(n_batches):
         if i % 100 == 0:
             logger.info(f'Writing batch {i}/{n_batches}...')
+        if i > 0 and i % 500 == 0:
+            log_performance(logger, level='debug', header=None)
 
         if i == 0:
             # Initialize with first batch
@@ -1144,6 +1169,12 @@ def save_preprocessing(filename, ops, bfile=None, bfile_path=None):
         else:
             # Re-use batch2 from previous iteration
             batch1 = batch2
+
+        # NOTE: dtype for new file is always int16, float32 data returned by
+        #       preproc steps is scaled by 200 and then converted.
+        mode = 'w+' if i == 0 else 'r+'
+        z = np.memmap(filename, dtype='int16', mode=mode,
+                      shape=(NT*n_batches, n_chans))
 
         if i == n_batches-1:
             # Skip first 2*nt of real data, it was added in previous iter.
@@ -1173,6 +1204,7 @@ def save_preprocessing(filename, ops, bfile=None, bfile_path=None):
             z[((i+1)*NT)-nt : ((i+1)*NT)+nt, chan_map] = (y2*200).astype('int16')
 
         z.flush()
+        del(z)
 
     logger.info('='*40)
     logger.info('Copying finished.')
