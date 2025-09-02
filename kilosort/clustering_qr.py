@@ -17,22 +17,25 @@ from kilosort.utils import log_performance
 logger = logging.getLogger(__name__)
 
 
-def neigh_mat(Xd, nskip=20, n_neigh=10, max_sub=None):
+def neigh_mat(Xd, nskip=1, n_neigh=10, max_sub=25000):
     # Xd is spikes by PCA features in a local neighborhood
     # finding n_neigh neighbors of each spike to a subset of every nskip spike
 
     # n_samples is the number of spikes, dim is number of features
     n_samples, dim = Xd.shape
 
-    # subsampling the feature matrix
-    if max_sub is not None:
-        # NOTE: Rather than selecting a fixed-size subset, we adjust nskip.
-        #       This is much faster than the alternatives we've tried since it's
-        #       more-or-less constant speed for arbitrarily large tensors, and it
-        #       keeps the logic simple elsewhere in the code.
-        new_nskip = int(np.ceil((n_samples-1)/(max_sub-1)))
-        if new_nskip > nskip: nskip = new_nskip
+    # Downsample feature matrix by selecting every `nskip`-th spike
     Xsub = Xd[::nskip]
+    n1 = Xsub.shape[0]
+    # If the downsampled matrix is still larger than max_sub,
+    # downsample it further by selecting `max_sub` evenly distributed spikes.
+    if (max_sub is not None) and (n1 > max_sub):
+        n2 = n1 - max_sub
+        idx, rev_idx = subsample_idx(n1, n2)
+        Xsub = Xsub[idx]
+    else:
+        rev_idx = None
+
     # n_nodes are the # subsampled spikes
     n_nodes = Xsub.shape[0]
 
@@ -55,7 +58,10 @@ def neigh_mat(Xd, nskip=20, n_neigh=10, max_sub=None):
                      (kn.shape[0], n_nodes))                  # (shape)
 
     # self connections are set to 0
-    M[np.arange(0,n_samples,nskip), np.arange(n_nodes)] = 0
+    skip_idx = np.arange(0, n_samples, nskip)
+    if rev_idx is not None:
+        skip_idx = skip_idx[rev_idx]
+    M[skip_idx, np.arange(n_nodes)] = 0
 
     return kn, M
 
@@ -112,7 +118,7 @@ def Mstats(M, device=torch.device('cuda')):
     return m, ki, kj
 
 
-def cluster(Xd, iclust=None, kn=None, nskip=20, n_neigh=10, max_sub=np.inf,
+def cluster(Xd, iclust=None, kn=None, nskip=1, n_neigh=10, max_sub=25000,
             nclust=200, seed=1, niter=200, lam=0, device=torch.device('cuda'),
             verbose=False):    
 
@@ -476,7 +482,6 @@ def run(ops, st, tF, mode='template', device=torch.device('cuda'),
                     if device == torch.device('cuda'):
                         torch.cuda.reset_peak_memory_stats(device)
                     v = True
-
                 if Xd.shape[0] < 1000:
                     iclust = torch.zeros((Xd.shape[0],))
                 else:
@@ -536,7 +541,7 @@ def run(ops, st, tF, mode='template', device=torch.device('cuda'),
             pass
         raise
 
-    if nearby_chans_empty == len(ycent):
+    if nearby_chans_empty == total_centers:
         raise ValueError(
             f'`get_data_cpu` never found suitable channels in `clustering_qr.run`.'
             f'\ndmin, dminx, and xcenter are: {dmin, dminx, xcup.mean()}'
