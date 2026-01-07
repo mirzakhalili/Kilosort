@@ -29,7 +29,6 @@ def check_split(Xd, kk, xtree, iclust, my_clus):
 
     score1 = bimod_score(xproj)
     score2 = my_bimod_score(xproj)
-    # return xproj, np.min((score1,score2))
     return xproj, score1,score2
 
 def clean_tree(valid_merge, xtree, inode):
@@ -60,6 +59,8 @@ def my_bimod_score(xproj):
     g= skew(xproj)
     k= kurtosis(xproj)
     n=len(xproj)
+    if n < 5:
+        return 0
     score=(g**2+1)/(k+3*(n-1)**2/(n-2)/(n-3))
     return score
 
@@ -109,7 +110,7 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
         score = np.nan
         if criterion==0:
             # first mutation is global modularity
-            if tstat[kk,0] < 0.25:
+            if tstat[kk,0] < 0.2:
                 criterion = -1
 
 
@@ -121,9 +122,8 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
         if criterion==0:
             xproj, score1,score2 = check_split(Xd, kk, xtree, iclust, my_clus)
             # third mutation is bimodality
-            #xproj, score = check_split(Xd, kk, xtree, iclust, my_clus)
             score=np.max((score1,score2))
-            criterion = 2 * (score <  .55) - 1     
+            criterion = 2 * (score <  .5) - 1     
 
         if criterion==0:
             # fourth mutation is local modularity (not reachable)
