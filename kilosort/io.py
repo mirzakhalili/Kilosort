@@ -134,7 +134,7 @@ def load_probe(probe_path):
 
     return probe
 
-  
+
 def save_probe(probe_dict, filepath):
     """Save a probe dictionary to a .json text file.
 
@@ -654,7 +654,7 @@ class BinaryRWFile:
         a, b = self._get_batch_edges(self.n_batches_raw-1)
         batch_size = b - a - self.nt
         if batch_size < self.nt:
-            self.n_batches -= 1
+            self.n_batches_raw -= 1
             self.imax -= batch_size
 
         self.set_downsampling(batch_downsampling)
