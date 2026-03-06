@@ -60,7 +60,7 @@ def my_bimod_score(xproj):
     k= kurtosis(xproj)
     n=len(xproj)
     if n < 5:
-        return 0
+        return 1
     score=(g**2+1)/(k+3*(n-1)**2/(n-2)/(n-3))
     return score
 
@@ -68,11 +68,11 @@ def check_CCG(st1, st2=None, nbins = 500, tbin  = 1/1000):
     if st2 is None:
         st2 = st1.copy()
     K , T = compute_CCG(st1, st2, nbins = nbins, tbin = tbin)
-    if len(st1) == 0 or len(st2 == 0) or T == 0:
+    if len(st1) == 0 or len(st2) == 0 or T == 0:
         return False, False
     R12, Q12, Q00 = CCG_metrics(st1, st2, K, T,  nbins = nbins, tbin = tbin)
     is_refractory    = R12<.1  and (Q12<.2  or Q00<.25)
-    cross_refractory = R12<.25 and (Q12<.05 or Q00<.25)
+    cross_refractory = R12<.1 and (Q12<.05 or Q00<.25)
     return is_refractory, cross_refractory
 
 def refractoriness(st1, st2):

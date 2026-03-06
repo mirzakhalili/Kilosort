@@ -208,7 +208,7 @@ def run_matching(ops, X, U, ctc, device=torch.device('cuda')):
         #print(Cfmax.shape)
         #import pdb; pdb.set_trace()
         cnd1 = Cmax[0,0] > Th**2
-        cnd2 = torch.abs(Cmax[0,0] - Cfmax) < 1e-9
+        cnd2 = torch.abs(Cmax[0,0] - Cfmax) < 1e-4 # used to be 1e-9, but float32 precision is not that good
         xs = torch.nonzero(cnd1 * cnd2)
 
         
@@ -236,7 +236,7 @@ def run_matching(ops, X, U, ctc, device=torch.device('cuda')):
         for j in range(n):
             Xres[:, iX[j::n] + tiwave]  -= amp[j::n] * torch.einsum('ijk, jl -> kil', U[iY[j::n,0]], W)
             B[   :, iX[j::n] + trange]  -= amp[j::n] * ctc[:,iY[j::n,0],:]
-
+        Th=Th*ops['Th_adapt']
     st = st[:k]
     amps = amps[:k]
     th_amps = th_amps[:k]

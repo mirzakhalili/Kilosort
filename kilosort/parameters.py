@@ -319,6 +319,15 @@ EXTRA_PARAMETERS = {
         """
     },
 
+    'Th_adapt': {
+        'gui_name': 'Th adapt', 'type': float, 'min': 1, 'max': 2, 'exclude': [],
+        'default': 1.005, 'step': 'spike detection',
+        'description':
+        """
+        Reduce Th_learned with each iteration.
+        """
+    },
+
     'templates_from_data': {
         'gui_name': 'templates from data', 'type': bool, 'min': None, 'max': None,
         'exclude': [], 'default': True, 'step': 'spike detection',

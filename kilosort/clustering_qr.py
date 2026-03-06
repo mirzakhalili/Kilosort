@@ -405,8 +405,10 @@ def get_nearest_centers(xy, xcent, ycent):
         (xy[0,:] - xcent_pos.unsqueeze(-1))**2
         + (xy[1,:] - ycent_pos.unsqueeze(-1))**2
         )
-    # Add some randomness in case of ties
-    center_distance += 1e-20*torch.rand(center_distance.shape)
+    # Add a tiny deterministic bias based on depth (ycent_pos) to break ties
+    # consistently based on probe geometry, rather than using random noise.
+    # This ensures reproducibility.
+    center_distance += 1e-6 * ycent_pos.unsqueeze(-1)
     # Get flattened index of x-y center that is closest to template
     minimum_distance = torch.min(center_distance, 0).indices
 
