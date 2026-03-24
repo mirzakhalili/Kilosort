@@ -432,6 +432,8 @@ def run(ops, st, tF, mode='template', device=torch.device('cuda'),
     nskip = ops['settings']['cluster_downsampling']
     n_neigh = ops['settings']['cluster_neighbors']
     max_sub = ops['settings']['max_cluster_subset']
+    adaptive_threshold = ops['settings']['adaptive_downsampling_threshold']
+    refractoriness_threshold = ops['settings']['refractoriness_threshold']
     seed = ops['settings']['cluster_init_seed']
     ycent = y_centers(ops)
     xcent = x_centers(ops)
@@ -493,9 +495,12 @@ def run(ops, st, tF, mode='template', device=torch.device('cuda'),
                     else:
                         st0 = None
 
+                    # Adaptive downsampling: use full resolution for small clusters
+                    nskip_current = 1 if Xd.shape[0] < adaptive_threshold else nskip
+
                     # find new clusters
                     iclust, iclust0, M, _ = cluster(
-                        Xd, nskip=nskip, n_neigh=n_neigh, max_sub=max_sub,
+                        Xd, nskip=nskip_current, n_neigh=n_neigh, max_sub=max_sub,
                         lam=1, seed=seed, device=device, verbose=v
                         )
 
@@ -510,7 +515,8 @@ def run(ops, st, tF, mode='template', device=torch.device('cuda'),
                     xtree, tstat, my_clus = hierarchical.maketree(M, iclust, iclust0)
 
                     xtree, tstat = swarmsplitter.split(
-                        Xd.numpy(), xtree, tstat,iclust, my_clus, meta=st0
+                        Xd.numpy(), xtree, tstat, iclust, my_clus, meta=st0,
+                        refractoriness_threshold=refractoriness_threshold
                         )
 
                     iclust = swarmsplitter.new_clusters(iclust, my_clus, xtree, tstat)

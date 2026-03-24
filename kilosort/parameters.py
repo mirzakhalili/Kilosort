@@ -473,6 +473,34 @@ EXTRA_PARAMETERS = {
             """
     },
 
+    'refractoriness_threshold': {
+        'gui_name': 'refractoriness threshold', 'type': int, 'min': 0, 'max': np.inf,
+        'exclude': [], 'default': 200, 'step': 'clustering',
+        'description':
+            """
+            Spike count threshold below which refractoriness (R12/Q12 metrics) 
+            are checked during hierarchical clustering. This allows small clusters
+            to be protected from merging based on refractory contamination, while
+            larger clusters rely more on bimodality checks. Setting to 0 disables
+            refractoriness checking entirely; setting very high values applies
+            refractoriness to all clusters.
+            """
+    },
+
+    'adaptive_downsampling_threshold': {
+        'gui_name': 'adaptive downsampling threshold', 'type': int, 'min': 1, 'max': np.inf,
+        'exclude': [], 'default': 25000, 'step': 'clustering',
+        'description':
+            """
+            Spike count threshold for adaptive downsampling during clustering.
+            Clusters with fewer spikes than this value will use downsampling=1 
+            (all spikes preserved) to capture fine structure. Clusters with more 
+            spikes will use the specified `cluster_downsampling` value. Set to
+            a very large value to disable adaptive behavior and always use 
+            `cluster_downsampling`.
+            """
+    },
+
 
     ### POSTPROCESSING
     'duplicate_spike_ms': {

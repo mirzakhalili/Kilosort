@@ -72,7 +72,7 @@ def check_CCG(st1, st2=None, nbins = 500, tbin  = 1/1000):
         return False, False
     R12, Q12, Q00 = CCG_metrics(st1, st2, K, T,  nbins = nbins, tbin = tbin)
     is_refractory    = R12<.1  and (Q12<.2  or Q00<.25)
-    cross_refractory = R12<.1 and (Q12<.05 or Q00<.25)
+    cross_refractory = R12<.1# and (Q12<.05 or Q00<.25)
     return is_refractory, cross_refractory
 
 def refractoriness(st1, st2):
@@ -93,7 +93,7 @@ def refractoriness(st1, st2):
         #    print('good cluster becomes bad')
     return criterion
 
-def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
+def split(Xd, xtree, tstat, iclust, my_clus, verbose=True, meta=None, refractoriness_threshold=200):
     xtree = np.array(xtree)
 
     kk = xtree.shape[0]-1
@@ -118,9 +118,11 @@ def split(Xd, xtree, tstat, iclust, my_clus, verbose = True, meta = None):
 
         if meta is not None and criterion==0:
             # second mutation is based on meta_data
-            criterion = refractoriness(meta[ix1],meta[ix2])
+            # only check refractoriness if both clusters are small
+            n1, n2 = ix1.sum(), ix2.sum()
+            if n1 < refractoriness_threshold or n2 < refractoriness_threshold:
+                criterion = refractoriness(meta[ix1], meta[ix2])
             #criterion = 0
-        
         if criterion==0:
             xproj, score1,score2 = check_split(Xd, kk, xtree, iclust, my_clus)
             # third mutation is bimodality
