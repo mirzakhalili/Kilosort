@@ -929,7 +929,8 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     logger.info('Merging clusters')
     logger.info('-'*40)
     Wall, clu, is_ref, st, tF = template_matching.merging_function(
-        ops, Wall, clu, st, tF, device=device, check_dt=True
+        ops, Wall, clu, st, tF, r_thresh=ops['settings']['merge_r_thresh'],
+        device=device, check_dt=True
         )
     clu = clu.astype('int32')
 

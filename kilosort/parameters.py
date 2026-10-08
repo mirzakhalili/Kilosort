@@ -311,7 +311,7 @@ EXTRA_PARAMETERS = {
 
     'max_peels': {
         'gui_name': 'max peels', 'type': int, 'min': 1, 'max': 10000, 'exclude': [],
-        'default': 100, 'step': 'spike detection',
+        'default': 200, 'step': 'spike detection',
         'description':
         """
         Number of iterations to do over each batch of data in the matching
@@ -319,12 +319,13 @@ EXTRA_PARAMETERS = {
         """
     },
 
-    'Th_adapt': {
-        'gui_name': 'Th adapt', 'type': float, 'min': 1, 'max': 2, 'exclude': [],
-        'default': 1.005, 'step': 'spike detection',
+    'min_amp_ratio': {
+        'gui_name': 'min amp ratio', 'type': float, 'min': 0, 'max': 1, 'exclude': [],
+        'default': 0.6, 'step': 'spike detection',
         'description':
         """
-        Reduce Th_learned with each iteration.
+        Detections with a fitted amplitude below this fraction of their template
+        are subtracted from the data but not kept as spikes (0: keep all).
         """
     },
 
@@ -478,12 +479,20 @@ EXTRA_PARAMETERS = {
         'exclude': [], 'default': 200, 'step': 'clustering',
         'description':
             """
-            Spike count threshold below which refractoriness (R12/Q12 metrics) 
-            are checked during hierarchical clustering. This allows small clusters
-            to be protected from merging based on refractory contamination, while
-            larger clusters rely more on bimodality checks. Setting to 0 disables
-            refractoriness checking entirely; setting very high values applies
-            refractoriness to all clusters.
+            Spike count below which a split is first checked for refractoriness
+            during hierarchical clustering: if either child is smaller and the two
+            children are cross-refractory (also when their CCG is empty), they are
+            kept merged; otherwise bimodality decides. Setting to 0 skips the check.
+            """
+    },
+
+    'merge_r_thresh': {
+        'gui_name': 'merge r thresh', 'type': float, 'min': 0, 'max': 1,
+        'exclude': [], 'default': 0.8, 'step': 'clustering',
+        'description':
+            """
+            Template similarity above which two clusters are tested for merging
+            in the final merge step (merged if their CCG is cross-refractory).
             """
     },
 

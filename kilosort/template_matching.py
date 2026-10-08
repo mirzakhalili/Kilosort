@@ -221,12 +221,13 @@ def run_matching(ops, X, U, ctc, device=torch.device('cuda')):
 
         #isort = torch.sort(iX)
 
-        nsp = len(iX)
-        st[k:k+nsp, 0] = iX[:,0]
-        st[k:k+nsp, 1] = iY[:,0]
-        amps[k:k+nsp] = B[iY,iX] / nm[iY]
-        amp = amps[k:k+nsp]
-        th_amps[k:k+nsp] = Cmax[0, 0, iX[:,0], None]**.5
+        amp = B[iY,iX] / nm[iY]
+        rec = amp[:,0] >= ops['min_amp_ratio']
+        nsp = int(rec.sum())
+        st[k:k+nsp, 0] = iX[rec,0]
+        st[k:k+nsp, 1] = iY[rec,0]
+        amps[k:k+nsp] = amp[rec]
+        th_amps[k:k+nsp] = Cmax[0, 0, iX[rec,0], None]**.5
 
         k+= nsp
 
@@ -236,7 +237,6 @@ def run_matching(ops, X, U, ctc, device=torch.device('cuda')):
         for j in range(n):
             Xres[:, iX[j::n] + tiwave]  -= amp[j::n] * torch.einsum('ijk, jl -> kil', U[iY[j::n,0]], W)
             B[   :, iX[j::n] + trange]  -= amp[j::n] * ctc[:,iY[j::n,0],:]
-        Th=Th*ops['Th_adapt']
     st = st[:k]
     amps = amps[:k]
     th_amps = th_amps[:k]
