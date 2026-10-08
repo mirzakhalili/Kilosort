@@ -30,34 +30,25 @@ def remove_duplicates(spike_times, spike_clusters, dt=15):
     return spike_times[keep], spike_clusters[keep], keep
 
 
-@njit("(int64[:], int32[:], float32[:], int32)")
-def remove_duplicates_with_global_mean_amplitude(spike_times, spike_clusters, amplitudes, dt=15):
+@njit("(int64[:], int32[:], float64[:], int32)")
+def remove_duplicates_keep_largest(spike_times, spike_clusters, score, dt=15):
 
-    '''Removes same-cluster spikes that occur within `dt` samples.'''
+    '''Removes same-cluster spikes that occur within `dt` samples, keeping the one with the largest score.'''
+    n_clusters = spike_clusters.max() + 1
+    t_last = np.zeros(n_clusters, np.int64)
+    best = -np.ones(n_clusters, np.int64)
     keep = np.zeros_like(spike_times, bool_)
-    checked= np.zeros_like(spike_times)
-    i = 0
-    unique_clusters = np.unique(spike_clusters)
-    mean_amplitude=np.zeros(unique_clusters.size, dtype=np.float32)
-    for c in unique_clusters:
-        mean_amplitude[c] = np.mean(amplitudes[spike_clusters == c])
     for i in range(spike_times.size):
-        if checked[i]==0:        
-            group = [i]
-            c = spike_clusters[i]
-            for j in range(i+1, spike_times.size):                
-                if spike_clusters[j] == c:                    
-                    if spike_times[j] - spike_times[i] <= dt:
-                        checked[j]=1
-                        group.append(j)
-                    else:
-                        break    
-            group=np.array(group)
-            test=amplitudes[group]            
-            ind_closest =np.argmin(np.abs(test-mean_amplitude[c])) 
-            picked_index = group[ind_closest]
-            keep[picked_index] = True
-            checked[picked_index]=0
+        c = spike_clusters[i]
+        if best[c] >= 0 and spike_times[i] < t_last[c] + dt:
+            if score[i] > score[best[c]]:
+                keep[best[c]] = False
+                keep[i] = True
+                best[c] = i
+        else:
+            best[c] = i
+            keep[i] = True
+        t_last[c] = spike_times[i]
 
     return spike_times[keep], spike_clusters[keep], keep
 
@@ -153,10 +144,7 @@ def make_pc_features(ops, spike_templates, spike_clusters, tF):
         # Assign features to overwrite tF in-place
         tF[igood,:] = Xd[:, ind[:n_chans], :]
         # Save channel inds for phy
-        try:
-            feature_ind[i,:] = ichan[ind[:n_chans]].cpu().numpy()
-        except Exception as e:
-            print(spike_clusters)
+        feature_ind[i,:] = ichan[ind[:n_chans]].cpu().numpy()
 
     # Swap last 2 dimensions to get ordering Phy expects
     tF = torch.permute(tF, (0, 2, 1))

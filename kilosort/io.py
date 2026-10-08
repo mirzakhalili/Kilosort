@@ -16,7 +16,7 @@ from torch.fft import fft, ifft, fftshift
 from kilosort import CCG
 from kilosort.preprocessing import get_drift_matrix, fft_highpass
 from kilosort.postprocessing import (
-    remove_duplicates, compute_spike_positions, make_pc_features,remove_duplicates_with_global_mean_amplitude
+    remove_duplicates, compute_spike_positions, make_pc_features,remove_duplicates_keep_largest
     )
 from kilosort.utils import log_performance
 
@@ -358,8 +358,8 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     # spike_times, spike_clusters, kept_spikes = remove_duplicates(
     #     spike_times, spike_clusters, dt=ops['duplicate_spike_bins']
     # )
-    spike_times, spike_clusters, kept_spikes = remove_duplicates_with_global_mean_amplitude(
-        spike_times, spike_clusters,amplitudes, dt=ops['duplicate_spike_bins']
+    spike_times, spike_clusters, kept_spikes = remove_duplicates_keep_largest(
+        spike_times, spike_clusters, st[:,2].astype('float64'), dt=ops['duplicate_spike_bins']
     )
     amp = amplitudes[kept_spikes]
     spike_templates = spike_templates[kept_spikes]
