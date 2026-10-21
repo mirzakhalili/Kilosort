@@ -228,6 +228,19 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
     # Don't use templates that are too far away from nearest channel
     # (use square of max distance since ds are squared distances)
     igood = ds[0,:] <= ops['max_channel_distance']**2
+    # Templates with no channel within ~70 um (at min_template_size 10) get detection weights that underflow to 0 in
+    # float32; the normalisation below then gives NaN, and a NaN template blocks detection in its whole
+    # nearest_templates neighbourhood (holes left by bad channels; JAW_149, 2026-10-21). Drop them. Kept templates get
+    # exactly the same weights as before, so probes without such templates are unchanged.
+    template_sizes = sig * (1+torch.arange(nsizes, device=device))
+    w_all = torch.exp(-torch.from_numpy(ds).to(device).float().unsqueeze(-1) / template_sizes**2)
+    w_all = w_all / (w_all**2).sum(0, keepdim=True)**.5
+    finite = torch.isfinite(w_all).all(0).all(-1).cpu().numpy()
+    n_nan = int((igood & ~finite).sum())
+    if n_nan > 0:
+        logger.info(f'Dropping {n_nan} universal templates with non-finite detection weights '
+                    '(no channel close enough).')
+    igood = igood & finite
     iC = iC[:,igood]
     ds = ds[:,igood]
     ys = ys[igood]
